@@ -5,7 +5,8 @@ import sys
 import glob
 import numpy as np
 import numpy.ma as ma  # masked arrays
-import tifffile  # for tiff file read
+#import pylibrary.tifffile as tifffile  # for tiff file read
+import tifffile
 import matplotlib.pyplot as mpl
 
 import pylibrary.PlotHelpers as PH
@@ -21,30 +22,48 @@ configfilename = 'montage.cfg'
 
 class Montager():
     def __init__(self, celldir='', verbose=False):
-        if os.path.isfile(configfilename):
-            try:
-                self.configuration = configfile.readConfigFile(configfilename)
-            except:
-                self.init_cfg()
-        else: # build base configuration file
-            self.init_cfg()
-        print (celldir)
-        print(self.configuration)
-        if celldir == '':  # no cell dir, us gui
-            celldir = self.configuration['Recents']
-            fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
-            celldir = fileselect.fileName
-            if celldir is None:
-                exit(0)
-        self.configuration['Recents'] = celldir
-        configfile.writeConfigFile(self.configuration, configfilename)
         self.verbose = verbose
-        self.cmap = 'Reds'
-        self.videos = glob.glob(celldir + '/video*.ma')
+        self.cmap = 'gist_gray_r'
+        if celldir is not '':
+            if os.path.isfile(configfilename):
+                try:
+                    self.configuration = configfile.readConfigFile(configfilename)
+                except:
+                    self.init_cfg()
+            else: # build base configuration file
+                self.init_cfg()
+            print (celldir)
+            print(self.configuration)
+            if celldir == '':  # no cell dir, us gui
+                celldir = self.configuration['Recents']
+                fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
+                celldir = fileselect.fileName
+                if celldir is None:
+                    exit(0)
+            self.configuration['Recents'] = celldir
+            configfile.writeConfigFile(self.configuration, configfilename)
+            self.videos = glob.glob(celldir + '/video*.ma')
+            self.images = glob.glob(celldir + '/image*.tif')
+            if len(self.videos) == 0 and len(self.images) == 0:
+                exit(0)
+            self.celldir = celldir.replace('_', '\_')
+        else:
+            self.videos = None # glob.glob(celldir + '/video*.ma')
+            self.images = None # glob.glob(celldir + '/image*.tif')
+            self.celldir = ''
+            
+    def get_images(self, celldir):
+        self.celldir = celldir
         self.images = glob.glob(celldir + '/image*.tif')
-        if len(self.videos) == 0 and len(self.images) == 0:
-            exit(0)
-        self.celldir = celldir.replace('_', '\_')
+
+    def get_image(self, imagename):
+        self.celldir = ''
+        self.images = [imagename]
+
+
+    def set_image(self, celldir, imagename):
+        self.celldir = celldir
+        self.images = glob.glob(os.path.join(celldir, imagename))
     
     def init_cfg(self):
         self.configuration = {'Recents': '', }
@@ -123,7 +142,10 @@ class Montager():
         r, c = PH.getLayoutDimensions(len(self.images), pref='height')
         f, ax = mpl.subplots(r, c)
         f.suptitle(self.celldir, fontsize=9)
-        ax = ax.ravel()
+        if isinstance(ax, list) or isinstance(ax, np.ndarray):
+            ax = ax.ravel()
+        else:
+            ax = [ax]
         PH.noaxes(ax)
         for i, img in enumerate(self.imagedata):
 #            print (self.imagemetadata[i])
@@ -398,8 +420,8 @@ if __name__ == '__main__':
 #    if sel.fileName is not None:
     M = Montager(verbose=False)
     M.list_images()
-    M.process_videos(window='pyqtgraph', show=True)
-    if sys.flags.interactive == 0:
-        pg.QtGui.QApplication.exec_()
-    #M.process_images(show=True)
+    # M.process_videos(window='pyqtgraph', show=True)
+    # if sys.flags.interactive == 0:
+    #     pg.QtGui.QApplication.exec_()
+    M.process_images(show=True)
      
