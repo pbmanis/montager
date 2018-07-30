@@ -1,4 +1,5 @@
 # montage
-import montager
+import montage.montager
+import montage.imreg
 
 

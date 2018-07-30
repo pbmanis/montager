@@ -15,7 +15,7 @@ import ephysanalysis as ep
 import pyqtgraph as pg
 from pyqtgraph import metaarray
 from pyqtgraph import configfile
-import imreg
+import montage.imreg
 import mahotas as MH
 
 configfilename = 'montage.cfg'
