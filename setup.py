@@ -14,5 +14,23 @@ setup(name='montage',
       author_email='pmanis@med.unc.edu',
       license='MIT',
       packages=find_packages(include=['montage*']),
-      zip_safe=False)
-      
+      zip_safe=False,
+
+      install_requires=['matplotlib>=3.0',
+          ],
+      entry_points={
+          'console_scripts': [
+               'montager=montage.montager:doit',
+          ],
+      },
+      classifiers = [
+             "Programming Language :: Python :: 3.6+",
+             "Development Status ::  Beta",
+             "Environment :: Console",
+             "Intended Audience :: Manis Lab",
+             "License :: MIT",
+             "Operating System :: OS Independent",
+             "Topic :: Software Development :: Tools :: Python Modules",
+             "Topic :: Data Processing :: Neuroscience",
+             ],
+    )

@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import os
 import sys
-import glob
+from pathlib import Path
 import numpy as np
 import numpy.ma as ma  # masked arrays
 #import pylibrary.tifffile as tifffile  # for tiff file read
@@ -11,9 +11,9 @@ import matplotlib.pyplot as mpl
 
 import pylibrary.PlotHelpers as PH
 import pylibrary.fileselector as FS
-import ephysanalysis as ep
+import pylibrary.pyqtgraphPlotHelpers as PGH
 import pyqtgraph as pg
-from pyqtgraph import metaarray
+from ephysanalysis import metaarray
 from pyqtgraph import configfile
 import montage.imreg
 import mahotas as MH
@@ -21,37 +21,47 @@ import mahotas as MH
 configfilename = 'montage.cfg'
 
 class Montager():
-    def __init__(self, celldir='', verbose=False):
+    def __init__(self, celldir=None, verbose=False, use_config=True):
+        self.configurationFiles = None
         self.verbose = verbose
         self.cmap = 'gist_gray_r'
-        if celldir is not '':
-            if os.path.isfile(configfilename):
-                try:
-                    self.configuration = configfile.readConfigFile(configfilename)
-                except:
-                    self.init_cfg()
-            else: # build base configuration file
+        # celldir = Path('/Volumes/Pegasus/ManisLab_Data3/Kasten_Michael/NF107Ai32Het')
+        if celldir is None:
+            if use_config and Path(configfilename).is_file():
+                self.configurationFiles = configfile.readConfigFile(configfilename)
+                celldir = Path(self.configurationFiles['Recents'])
+            elif not Path(configfilename).is_file():
                 self.init_cfg()
-            print (celldir)
-            print(self.configuration)
-            if celldir == '':  # no cell dir, us gui
-                celldir = self.configuration['Recents']
-                fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
-                celldir = fileselect.fileName
-                if celldir is None:
-                    exit(0)
-            self.configuration['Recents'] = celldir
-            configfile.writeConfigFile(self.configuration, configfilename)
-            self.videos = glob.glob(celldir + '/video*.ma')
-            self.images = glob.glob(celldir + '/image*.tif')
-            if len(self.videos) == 0 and len(self.images) == 0:
+                celldir = self.configurationFiles['Recents']
+            else:
+                exit() # print('Celldir: ', celldir)
+            if celldir is None or len(str(celldir)) == 0:
+                celldir = '/'
+            fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
+            if fileselect is None:
+                print('No directory selected, exiting')
                 exit(0)
-            self.celldir = celldir.replace('_', '\_')
+            celldir = Path(fileselect.fileName)
+            if celldir is not None and len(str(celldir)) > 0 and str(celldir) != '.':
+                print('Saving celldir to config: ', celldir)
+                self.configurationFiles['Recents'] = str(celldir)
+                configfile.writeConfigFile(self.configurationFiles, configfilename)
         else:
-            self.videos = None # glob.glob(celldir + '/video*.ma')
-            self.images = None # glob.glob(celldir + '/image*.tif')
-            self.celldir = ''
-            
+            celldir = Path(celldir)
+        print('celldir: ', celldir)
+        self.videos = list(celldir.glob('video*.ma'))
+        self.images = list(celldir.glob('image*.tif'))
+        # if len(self.videos) == 0 and len(self.images) == 0:
+        #     exit(0)
+        self.celldir = celldir
+        self.celldirname = str(celldir).replace('_', '\_')
+        # else:
+        #     self.videos = None # glob.glob(celldir + '/video*.ma')
+        #     self.images = None # glob.glob(celldir + '/image*.tif')
+        #     self.celldir = Path(celldir)
+        self.list_images_and_videos()
+
+
     def get_images(self, celldir):
         self.celldir = celldir
         self.images = glob.glob(celldir + '/image*.tif')
@@ -60,18 +70,18 @@ class Montager():
         self.celldir = ''
         self.images = [imagename]
 
-
     def set_image(self, celldir, imagename):
         self.celldir = celldir
         self.images = glob.glob(os.path.join(celldir, imagename))
-    
+
     def init_cfg(self):
+        print('initializing configuration file')
         self.configuration = {'Recents': '', }
         configfile.writeConfigFile(self.configuration, configfilename)
-        
-    def list_images(self):
-        print(self.videos)
-        print(self.images)
+
+    def list_images_and_videos(self):
+        print('videos: ', self.videos)
+        print('images: ', self.images)
         print('videos:')
         for vf in self.videos:
             vp, v = os.path.split(vf)
@@ -82,10 +92,11 @@ class Montager():
             print('   %s' % i)
         print()
 
-    def process_videos(self, show=True, window='pyqtgraph'):
+    def process_videos(self, show=True, window='pyqtgraph', gamma=1.0, merge_gamma=1.0, sigma=2.0):
         self.loadvideos()
-        self.flatten_all_videos()
-        self.merge_flattened_videos()
+        self.flatten_all_videos(gamma=gamma, sigma=sigma)
+        
+        self.merge_flattened_videos(imagedata=self.allflat, metadata=self.videometadata, gamma=merge_gamma, )
 
         if window == 'mpl':
             f, ax = mpl.subplots(1,1)
@@ -94,7 +105,7 @@ class Montager():
             self.show_merged_MPL(self.merged_image, ax, show=show)
         else:
             self.show_merged_pyqtgraph(self.merged_image, show=show)
-        
+
     def loadvideos(self):
         """
         loads all videos in the dir into a list
@@ -116,10 +127,31 @@ class Montager():
             except:
                 raise Exception('No matching .index entry for video file %s' % imf)
 
-    def process_images(self, show=True):
+    def process_images(self, window='pyqtgraph', show=True, gamma=2.2):
         self.load_images()
-        self.show_images(show=show)
-    
+        self.show_images(window=window, show=show, gamma=gamma)
+
+    def process_images_and_videos(self, show=True, window='pyqtgraph', gamma=1.0, merge_gamma=1.0, sigma=2.0):
+        """
+        I don't recommend this, although it works - makes a very large image
+        """
+        self.loadvideos()
+        self.flatten_all_videos(gamma=gamma, sigma=sigma)
+        self.load_images()
+        for i, d in enumerate(self.imagedata):
+            self.allflat.append(self.imagedata[i])
+            self.videometadata.append(self.imagemetadata[i])
+        self.merge_flattened_videos(imagedata=self.allflat, metadata=self.videometadata, gamma=merge_gamma, )
+
+        if window == 'mpl':
+            f, ax = mpl.subplots(1,1)
+            f.suptitle(self.celldir)
+            #ax = ax.ravel()
+            self.show_merged_MPL(self.merged_image, ax, show=show)
+        else:
+            self.show_merged_pyqtgraph(self.merged_image, show=show)
+        
+
     def load_images(self):
         self.imagedata = []
         self.imagemetadata = []
@@ -134,80 +166,104 @@ class Montager():
             try:
                 if imf in self._index.keys():
                     self.imagemetadata.append(self._index[imf])
-                    
+
             except:
                 raise Exception('No matching .index entry for image file %s' % imf)
 
-    def show_images(self, show=True):
-        r, c = PH.getLayoutDimensions(len(self.images), pref='height')
-        f, ax = mpl.subplots(r, c)
-        f.suptitle(self.celldir, fontsize=9)
-        if isinstance(ax, list) or isinstance(ax, np.ndarray):
-            ax = ax.ravel()
-        else:
-            ax = [ax]
-        PH.noaxes(ax)
-        for i, img in enumerate(self.imagedata):
-#            print (self.imagemetadata[i])
-            fna, fne = os.path.split(self.images[i])
-            imfig = ax[i].imshow(self.gamma_correction(img, 2.2))
-            PH.noaxes(ax[i])
-            ax[i].set_title(fne.replace('_', '\_'), fontsize=8)
-            imfig.set_cmap(self.cmap)
-        if show:
-            mpl.show()        
-    
+    def show_images(self, window='pyqtgraph', show=True, gamma=2.2):
+        rows, cols = PH.getLayoutDimensions(len(list(self.images)), pref='height')
+        if window == 'mpl':
+            f, ax = mpl.subplots(rows, cols)
+            f.suptitle(self.celldir, fontsize=9)
+            if isinstance(ax, list) or isinstance(ax, np.ndarray):
+                ax = ax.ravel()
+            else:
+                ax = [ax]
+            PH.noaxes(ax)
+            for i, img in enumerate(self.imagedata):
+    #            print (self.imagemetadata[i])
+                fna, fne = os.path.split(self.images[i])
+                print('gamma: ', gamma)
+                imfig = ax[i].imshow(self.gamma_correction(img, gamma=gamma))
+                PH.noaxes(ax[i])
+                ax[i].set_title(fne.replace('_', '\_'), fontsize=8)
+                imfig.set_cmap(self.cmap)
+            if show:
+                mpl.show()
+        elif window == 'pyqtgraph':
+            self.graphs = PGH.LayoutMaker(cols=cols, rows=rows, win=self.win, labelEdges=False, ticks='talbot', items='images')
+            k = 0
+            for i in range(rows):
+                for j in range(cols):
+                    if k >= len(self.imagedata):
+                        break
+                    thisimg = self.gamma_correction(self.imagedata[k], 2.2)
+                    print(thisimg.shape)
+                    imgview = self.graphs.plots[i][j]
+                                        # textlabel = pg.TextItem(f"t = {sd['elapsedtime']:.2f}", anchor=(0, 1.1))
+                    imgview.ui.roiBtn.hide()
+                    imgview.ui.menuBtn.hide()
+                    # imgview.ui.histogram.hide()
+                    imgview.setImage(thisimg)
+                    k += 1
+
+                
+            
+            
     def generate_colormap(self, mplname):
         from matplotlib import cm
 
         # Get the colormap
-        colormap = cm.get_cmap(mplname) 
+        colormap = cm.get_cmap(mplname)
         colormap._init()
         lut = (colormap._lut * 255).view(np.ndarray)  # Convert matplotlib colormap from 0-1 to 0 -255 for Qt
 
         # Apply the colormap
         self.pgMergedImage.setLookupTable(lut)
 
-    def flatten_all_videos(self):
+    def flatten_all_videos(self, gamma=1.0, sigma=2.0):
         self.allflat = []
         for i, vdat in enumerate(self.videodata):
             print('   Flattening video %03d' % i)
-            self.allflat.append(self.flatten_video(vdat))
+            self.allflat.append(self.flatten_video(vdat, gamma=gamma, sigma=sigma))
 
-    def flatten_video(self, video):
+    def flatten_video(self, video, gamma=2.2, sigma=2.0):
         """
         Merge a video stack to a single image using max projection and filter
         """
         maxv = 0.
         stack,h,w = video.shape
-        focus = np.array([MH.sobel(t, just_filter=True) for t in video])
+        focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
         best = np.argmax(focus, 0)
         video = video.reshape((stack,-1)) # image is now (stack, nr_pixels)
         video = video.transpose() # image is now (nr_pixels, stack)
         video = video[np.arange(len(video)), best.ravel()] # Select the right pixel at each location
         video = video.reshape((h,w)) # reshape to get final result
+        video = MH.gaussian_filter(video, sigma=sigma)
         return video
 
     def show_merged_MPL(self, video, ax, show=True):
         imfig = ax.imshow(video)
         PH.noaxes(ax)
-        imfig.set_cmap('viridis')
+        imfig.set_cmap('gray_r')
         if show:
             mpl.show()
-    
+
     def show_merged_pyqtgraph(self, video, show=True):
-        self.pgMergedImage = pg.image(video)  # 
+        self.pgMergedImage = pg.image(video)  #
 
     def show_unmerged(self):
         r, c = PH.getLayoutDimensions(len(self.videos), pref='height')
         f, ax = mpl.subplots(r, c)
         ax = ax.ravel()
         PH.noaxes(ax)
-        
-    def rebin(self, a, newshape ):
+
+    def rebin(self, a, newshape):
         '''
         Rebin an array to a new shape.
         '''
+        # print(a.shape)
+        # print(newshape)
         assert len(a.shape) == len(newshape)
         if a.shape == newshape:
             return(a)  # skip..
@@ -217,12 +273,13 @@ class Montager():
         rb = a[tuple(indices)]
         nbins = np.prod(newshape)/np.prod(a.shape)
         return rb/nbins
-        
-    def merge_flattened_videos(self):
+
+    def merge_flattened_videos(self, imagedata, metadata, gamma=1.0):
         minx = 100000.  # start with really big values
         maxx = -100000.
         miny = 100000.
         maxy = -100000.
+        
         print ('Combining videos')
 
         exposures = []
@@ -235,8 +292,15 @@ class Montager():
         vscalex = 1.
         vscaley = 1.
         yflip = 1.
+        # determine order of merge. Brightest images are done first so they
+        # are underneath all others.
+        imax = np.zeros(len(imagedata))
+        for i, vdata in enumerate(imagedata):
+            imax[i] = np.max(np.max(vdata))
+        jmax = np.argsort(imax)
+        print('jmax: ', jmax)
         # find extent for all images
-        for i, v in enumerate(self.videometadata):
+        for i, v in enumerate(metadata):
             vt = v['transform']
             vr = v['region']
             vb = v['binning']
@@ -272,20 +336,20 @@ class Montager():
             print('grid_x, y: ', grid_x, grid_y)
         self.merged_image = np.zeros((grid_x, grid_y))  # create space to hold image
         self.n_images = np.zeros((grid_x, grid_y))
-        for i, vdata in enumerate(self.allflat):  # place the images onto the big map
+        for i, vdata in enumerate(imagedata):  # place the images onto the big map
             vdata = vdata/exposures[i]
-            v = self.videometadata[i]
+            v = metadata[i]
             vt = v['transform']
             vp = vt['pos']
             vr = v['region']
             vb = v['binning']
-            
+
             ix = int((vp[0]-minx)/vscalex)
             iy = int((vp[1]-miny)/vscaley)
             if self.verbose:
                 print('vb: ', vb)
                 print('vr: ', vr)
-                print('Mapping Vvideo image i: %d' % i, vdata.shape)
+                print('Mapping Video image i: %d' % i, vdata.shape)
                 print('to new shape: ', vdata.shape[0]*vb[0], vdata.shape[1]*vb[1])
             vdata = self.rebin(vdata, (vdata.shape[0]*vb[0], vdata.shape[1]*vb[1]))
             # check bounds for mapping
@@ -308,7 +372,7 @@ class Montager():
                 self.n_images = np.pad(self.n_images,
                     pad_width=((0, delx),(0, dely+1)),
                     mode='constant', constant_values=0.)
-            
+
             yseq = range(iyw, iy, -1)
             print('max yseq: ', max(yseq))
             # find if region already has an image here, and do a registration using the area that overlaps
@@ -356,26 +420,26 @@ class Montager():
             #     offt = np.array(off).T
             #
             #     #exit(1)
-            
+
             self.n_images[ix:ixw, yseq] += 1.0
-            
+
             self.merged_image[ix:ixw, yseq] += vdata
         self.n_images[self.n_images == 0.] = np.nan  # trick for avoiding divide by 0
         self.merged_image = self.merged_image/self.n_images
         # minintensity = np.nanmin(np.nanmin(self.merged_image[self.merged_image > 0]))
         # self.merged_image -= minintensity
         #self.merged_image = np.nan_to_num(self.merged_image-minintensity)
-        self.merged_image = self.gamma_correction(self.merged_image, 2.2)
+        self.merged_image = np.fliplr(self.gamma_correction(self.merged_image, gamma=gamma))
         #self.merged_image = self.threshold_image(self.merged_image, 2000.)
        # self.merged_image = self.rolling_ball(self.merged_image)
-    
+
     def gamma_correction(self, image, gamma=2.2, imagescale=2^16):
         if gamma == 0.0:
             return image
         imagescale= float(imagescale)
         corrected = (np.power((image/imagescale), (1. / gamma)))*imagescale
         return corrected
-    
+
     def threshold_image(self, image, thr):
         image[image<thr] = 0.
         image[image>=thr] = 1.
@@ -413,15 +477,22 @@ class Montager():
             return self._index
         self._index = configfile.readConfigFile(indexFile)
         return self._index
-        
 
-if __name__ == '__main__':
-#    sel = FS.FileSelector(dialogtype='dir')
-#    if sel.fileName is not None:
-    M = Montager(verbose=False)
-    M.list_images()
-    # M.process_videos(window='pyqtgraph', show=True)
+def doit():
+    # sel = FS.FileSelector(dialogtype='dir')
+    # print('main sel filename: ', sel.fileName)
+    # if sel.fileName is not None:
+    M = Montager(verbose=False) # , celldir=Path(sel.fileName))
+    # M.app = pg.mkQApp()
+    # M.win = pg.QtGui.QWidget()
+    M.list_images_and_videos()
+    # M.process_images_and_videos(window='pyqtgraph', show=True, gamma=2.2, merge_gamma=2., sigma=3.0)
+    # M.process_videos(window='pyqtgraph', show=True, gamma=2.2, merge_gamma=2., sigma=3.0)
+    M.process_images(window='mpl', show=True, gamma=1.5)
+    # print('M: ', M)
     # if sys.flags.interactive == 0:
     #     pg.QtGui.QApplication.exec_()
-    M.process_images(show=True)
-     
+
+    
+if __name__ == '__main__':
+    M = doit()
