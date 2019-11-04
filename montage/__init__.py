@@ -1,5 +1,5 @@
 # montage
 import montage.montager
-import montage.imreg
+# import montage.imreg
 
 
