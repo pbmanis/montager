@@ -18,7 +18,7 @@ import pylibrary.plotting.pyqtgraph_plothelpers as PGH
 from ephys.ephysanalysis import metaarray
 import imreg_dft as imreg
 # import montage.imreg
-import mahotas as MH
+# import mahotas as MH
 from shapely.geometry import Polygon, MultiPolygon
 from descartes.patch import PolygonPatch
 from shapely.ops import unary_union
@@ -262,7 +262,8 @@ class Montager():
         """
         maxv = 0.
         stack,h,w = video.shape
-        focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
+        # focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
+        focus = self.gamma_correction(t, gamma-gamma)
         best = np.argmax(focus, 0)
         video = video.reshape((stack,-1))# image is now (stack, nr_pixels)
         video = video.transpose()  # image is now (nr_pixels, stack)
