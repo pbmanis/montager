@@ -15,7 +15,7 @@ import pylibrary.tools.tifffile as tiffile
 import pylibrary.plotting.plothelpers as PH
 import pylibrary.tools.fileselector as FS
 import pylibrary.plotting.pyqtgraph_plothelpers as PGH
-from ephysanalysis import metaarray
+from ephys.ephysanalysis import metaarray
 import imreg_dft as imreg
 # import montage.imreg
 import mahotas as MH
