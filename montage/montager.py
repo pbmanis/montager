@@ -6,12 +6,12 @@ import glob
 import numpy as np
 import numpy.ma as ma  # masked arrays
 #import pylibrary.tifffile as tifffile  # for tiff file read
-import tifffile
+import pylibrary.tools.tifffile as tiffile
 import matplotlib.pyplot as mpl
 
-import pylibrary.PlotHelpers as PH
-import pylibrary.fileselector as FS
-import ephysanalysis as ep
+import pylibrary.plotting.plothelpers as PH
+import pylibrary.tools.fileselector as FS
+# import ephysanalysis as ep
 import pyqtgraph as pg
 from pyqtgraph import metaarray
 from pyqtgraph import configfile
