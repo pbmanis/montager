@@ -2,56 +2,90 @@ from __future__ import print_function
 
 import os
 import sys
-import glob
+from pathlib import Path
 import numpy as np
 import numpy.ma as ma  # masked arrays
-#import pylibrary.tifffile as tifffile  # for tiff file read
-import pylibrary.tools.tifffile as tiffile
+import scipy
 import matplotlib.pyplot as mpl
+from pyqtgraph import configfile
 
+import pyqtgraph as pg
+
+import pylibrary.tools.tifffile as tiffile
 import pylibrary.plotting.plothelpers as PH
 import pylibrary.tools.fileselector as FS
 # import ephysanalysis as ep
-import pyqtgraph as pg
-from pyqtgraph import metaarray
-from pyqtgraph import configfile
-import montage.imreg
+import pylibrary.fileselector as FS
+import pylibrary.plotting.pyqtgraph_plothelpers as PGH
+from ephysanalysis import metaarray
+import imreg_dft as imreg
+# import montage.imreg
 import mahotas as MH
+from shapely.geometry import Polygon, MultiPolygon
+from descartes.patch import PolygonPatch
+from shapely.ops import unary_union
 
 configfilename = 'montage.cfg'
 
 class Montager():
-    def __init__(self, celldir='', verbose=False):
+    def __init__(self, celldir=None, verbose=False, use_config=True):
+        self.configurationFiles = None
         self.verbose = verbose
         self.cmap = 'gist_gray_r'
-        if celldir is not '':
-            if os.path.isfile(configfilename):
-                try:
-                    self.configuration = configfile.readConfigFile(configfilename)
-                except:
-                    self.init_cfg()
-            else: # build base configuration file
+        self.videos = []
+        self.images = []
+        self.celldir = celldir
+        self.use_config = use_config
+    
+    def run(self):
+        celldir = self.celldir
+
+        # celldir = Path('/Volumes/Pegasus/ManisLab_Data3/Kasten_Michael/NF107Ai32Het')
+        if celldir is None:
+            if self.use_config and Path(configfilename).is_file():
+                self.configurationFiles = configfile.readConfigFile(configfilename)
+                celldir = Path(self.configurationFiles['Recents'])
+            elif not Path(configfilename).is_file():
                 self.init_cfg()
-            print (celldir)
-            print(self.configuration)
-            if celldir == '':  # no cell dir, us gui
-                celldir = self.configuration['Recents']
-                fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
-                celldir = fileselect.fileName
-                if celldir is None:
-                    exit(0)
-            self.configuration['Recents'] = celldir
-            configfile.writeConfigFile(self.configuration, configfilename)
-            self.videos = glob.glob(celldir + '/video*.ma')
-            self.images = glob.glob(celldir + '/image*.tif')
-            if len(self.videos) == 0 and len(self.images) == 0:
+                if self.configurationFiles is not None:
+                    celldir = self.configurationFiles['Recents']
+                else:
+                    celldir = '.'
+            else:
+                exit() # print('Celldir: ', celldir)
+            if celldir is None or len(str(celldir)) == 0:
+                celldir = '/'
+            fileselect = FS.FileSelector(dialogtype='dir', startingdir=celldir)
+            if fileselect is None:
+                print('No directory selected, exiting')
                 exit(0)
-            self.celldir = celldir.replace('_', '\_')
+            celldir = Path(fileselect.fileName)
+            if celldir is not None and len(str(celldir)) > 0 and str(celldir) != '.':
+                print('Saving celldir to config: ', celldir)
+                self.configurationFiles['Recents'] = str(celldir)
+                configfile.writeConfigFile(self.configurationFiles, configfilename)
         else:
-            self.videos = None # glob.glob(celldir + '/video*.ma')
-            self.images = None # glob.glob(celldir + '/image*.tif')
-            self.celldir = ''
-            
+            celldir = Path(celldir)
+        print('celldir: ', celldir)
+        self.videos = list(celldir.glob('video*.ma'))
+        self.images = list(celldir.glob('image*.tif'))
+        # if len(self.videos) == 0 and len(self.images) == 0:
+        #     exit(0)
+        self.celldir = celldir
+        self.celldirname = str(celldir).replace('_', '\_')
+        # else:
+        #     self.videos = None # glob.glob(celldir + '/video*.ma')
+        #     self.images = None # glob.glob(celldir + '/image*.tif')
+        #     self.celldir = Path(celldir)
+        self.list_images_and_videos()
+
+    def setup(self, mosaics):
+        for m in mosaics:
+            if m['name'].startswith('video_'):
+                self.videos.append(Path(self.celldir.parent, m['name']))
+        self.celldirname = str(self.celldir).replace('_', '\_')
+        
+
     def get_images(self, celldir):
         self.celldir = celldir
         self.images = glob.glob(celldir + '/image*.tif')
@@ -60,18 +94,18 @@ class Montager():
         self.celldir = ''
         self.images = [imagename]
 
-
     def set_image(self, celldir, imagename):
         self.celldir = celldir
         self.images = glob.glob(os.path.join(celldir, imagename))
-    
+
     def init_cfg(self):
+        print('initializing configuration file')
         self.configuration = {'Recents': '', }
         configfile.writeConfigFile(self.configuration, configfilename)
-        
-    def list_images(self):
-        print(self.videos)
-        print(self.images)
+
+    def list_images_and_videos(self):
+        print('videos: ', self.videos)
+        print('images: ', self.images)
         print('videos:')
         for vf in self.videos:
             vp, v = os.path.split(vf)
@@ -82,19 +116,24 @@ class Montager():
             print('   %s' % i)
         print()
 
-    def process_videos(self, show=True, window='pyqtgraph'):
+    def process_videos(self, show=True, window='pyqtgraph', gamma=1.0, merge_gamma=1.0, sigma=2.0, 
+        register=True, mosaic_data=None):
         self.loadvideos()
-        self.flatten_all_videos()
-        self.merge_flattened_videos()
-
-        if window == 'mpl':
-            f, ax = mpl.subplots(1,1)
-            f.suptitle(self.celldir)
-            #ax = ax.ravel()
-            self.show_merged_MPL(self.merged_image, ax, show=show)
-        else:
-            self.show_merged_pyqtgraph(self.merged_image, show=show)
+        self.flatten_all_videos(gamma=gamma, sigma=sigma)
         
+        self.merge_flattened_videos(imagedata=self.allflat, metadata=self.videometadata, gamma=merge_gamma, 
+            register=register, mosaic_data=mosaic_data)
+        if show:
+            if window == 'mpl':
+                f, ax = mpl.subplots(1,1)
+                f.suptitle(self.celldir)
+                #ax = ax.ravel()
+                self.show_merged_MPL(self.merged_image, ax, show=show)
+            elif window == 'pyqtgraph':
+                self.show_merged_pyqtgraph(self.merged_image, show=show)
+            else:
+                pass
+
     def loadvideos(self):
         """
         loads all videos in the dir into a list
@@ -116,10 +155,34 @@ class Montager():
             except:
                 raise Exception('No matching .index entry for video file %s' % imf)
 
-    def process_images(self, show=True):
+    def process_images(self, window='pyqtgraph', show=True, gamma=2.2):
         self.load_images()
-        self.show_images(show=show)
-    
+        self.show_images(window=window, show=show, gamma=gamma)
+
+    def process_images_and_videos(self, show=True, window='pyqtgraph', gamma=1.0, merge_gamma=1.0, sigma=2.0, 
+            register=True, mosaic_data=None):
+        """
+        I don't recommend this, although it works - makes a very large image
+        """
+        self.loadvideos()
+        self.flatten_all_videos(gamma=gamma, sigma=sigma)
+        self.load_images()
+        for i, d in enumerate(self.imagedata):
+            self.allflat.append(self.imagedata[i])
+            self.videometadata.append(self.imagemetadata[i])
+        self.merge_flattened_videos(imagedata=self.allflat, metadata=self.videometadata, gamma=merge_gamma, 
+            register=register, mosaic_data=mosaic_data)
+
+        if show:
+            if window == 'mpl':
+                f, ax = mpl.subplots(1,1)
+                f.suptitle(self.celldir)
+                #ax = ax.ravel()
+                self.show_merged_MPL(self.merged_image, ax, show=show)
+            else:
+                self.show_merged_pyqtgraph(self.merged_image, show=show)
+        
+
     def load_images(self):
         self.imagedata = []
         self.imagemetadata = []
@@ -134,80 +197,112 @@ class Montager():
             try:
                 if imf in self._index.keys():
                     self.imagemetadata.append(self._index[imf])
-                    
+
             except:
                 raise Exception('No matching .index entry for image file %s' % imf)
 
-    def show_images(self, show=True):
-        r, c = PH.getLayoutDimensions(len(self.images), pref='height')
-        f, ax = mpl.subplots(r, c)
-        f.suptitle(self.celldir, fontsize=9)
-        if isinstance(ax, list) or isinstance(ax, np.ndarray):
-            ax = ax.ravel()
-        else:
-            ax = [ax]
-        PH.noaxes(ax)
-        for i, img in enumerate(self.imagedata):
-#            print (self.imagemetadata[i])
-            fna, fne = os.path.split(self.images[i])
-            imfig = ax[i].imshow(self.gamma_correction(img, 2.2))
-            PH.noaxes(ax[i])
-            ax[i].set_title(fne.replace('_', '\_'), fontsize=8)
-            imfig.set_cmap(self.cmap)
-        if show:
-            mpl.show()        
-    
+    def show_images(self, window='pyqtgraph', show=True, gamma=2.2):
+        rows, cols = PH.getLayoutDimensions(len(list(self.images)), pref='height')
+        if window == 'mpl':
+            f, ax = mpl.subplots(rows, cols)
+            f.suptitle(self.celldir, fontsize=9)
+            if isinstance(ax, list) or isinstance(ax, np.ndarray):
+                ax = ax.ravel()
+            else:
+                ax = [ax]
+            PH.noaxes(ax)
+            for i, img in enumerate(self.imagedata):
+    #            print (self.imagemetadata[i])
+                fna, fne = os.path.split(self.images[i])
+                print('gamma: ', gamma)
+                imfig = ax[i].imshow(self.gamma_correction(img, gamma=gamma))
+                PH.noaxes(ax[i])
+                ax[i].set_title(fne.replace('_', '\_'), fontsize=8)
+                imfig.set_cmap(self.cmap)
+            if show:
+                mpl.show()
+        elif window == 'pyqtgraph':
+            self.graphs = PGH.LayoutMaker(cols=cols, rows=rows, win=self.win, labelEdges=False, ticks='talbot', items='images')
+            k = 0
+            for i in range(rows):
+                for j in range(cols):
+                    if k >= len(self.imagedata):
+                        break
+                    thisimg = self.gamma_correction(self.imagedata[k], 2.2)
+                    print(thisimg.shape)
+                    imgview = self.graphs.plots[i][j]
+                                        # textlabel = pg.TextItem(f"t = {sd['elapsedtime']:.2f}", anchor=(0, 1.1))
+                    imgview.ui.roiBtn.hide()
+                    imgview.ui.menuBtn.hide()
+                    # imgview.ui.histogram.hide()
+                    imgview.setImage(thisimg)
+                    k += 1
+
+                
+            
+            
     def generate_colormap(self, mplname):
         from matplotlib import cm
 
         # Get the colormap
-        colormap = cm.get_cmap(mplname) 
+        colormap = cm.get_cmap(mplname)
         colormap._init()
         lut = (colormap._lut * 255).view(np.ndarray)  # Convert matplotlib colormap from 0-1 to 0 -255 for Qt
 
         # Apply the colormap
         self.pgMergedImage.setLookupTable(lut)
 
-    def flatten_all_videos(self):
+    def flatten_all_videos(self, gamma=1.0, sigma=2.0):
         self.allflat = []
         for i, vdat in enumerate(self.videodata):
             print('   Flattening video %03d' % i)
-            self.allflat.append(self.flatten_video(vdat))
+            self.allflat.append(self.flatten_video(vdat, gamma=gamma, sigma=sigma))
 
-    def flatten_video(self, video):
+    def flatten_video(self, video, gamma=2.2, sigma=2.0):
         """
         Merge a video stack to a single image using max projection and filter
         """
         maxv = 0.
         stack,h,w = video.shape
-        focus = np.array([MH.sobel(t, just_filter=True) for t in video])
+        focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
         best = np.argmax(focus, 0)
-        video = video.reshape((stack,-1)) # image is now (stack, nr_pixels)
-        video = video.transpose() # image is now (nr_pixels, stack)
+        video = video.reshape((stack,-1))# image is now (stack, nr_pixels)
+        video = video.transpose()  # image is now (nr_pixels, stack)
         video = video[np.arange(len(video)), best.ravel()] # Select the right pixel at each location
         video = video.reshape((h,w)) # reshape to get final result
+        # video = MH.gaussian_filter(video, sigma=sigma)
         return video
 
     def show_merged_MPL(self, video, ax, show=True):
         imfig = ax.imshow(video)
         PH.noaxes(ax)
-        imfig.set_cmap('viridis')
+        imfig.set_cmap('gray_r')
         if show:
             mpl.show()
-    
+
     def show_merged_pyqtgraph(self, video, show=True):
-        self.pgMergedImage = pg.image(video)  # 
+        # downsample video image to 1024x1024 at most
+        np.nan_to_num(video, copy=False)
+        print('video - image shape: ', video.shape)
+        print(np.max(np.max(video)))
+        videon = scipy.misc.imresize(video, (1024, 1024), 'lanczos')
+        print(videon.shape)
+        print(np.max(np.max(videon)))
+        
+        self.pgMergedImage = pg.image(videon)  #
 
     def show_unmerged(self):
         r, c = PH.getLayoutDimensions(len(self.videos), pref='height')
         f, ax = mpl.subplots(r, c)
         ax = ax.ravel()
         PH.noaxes(ax)
-        
-    def rebin(self, a, newshape ):
+
+    def rebin(self, a, newshape):
         '''
         Rebin an array to a new shape.
         '''
+        # print(a.shape)
+        # print(newshape)
         assert len(a.shape) == len(newshape)
         if a.shape == newshape:
             return(a)  # skip..
@@ -217,14 +312,14 @@ class Montager():
         rb = a[tuple(indices)]
         nbins = np.prod(newshape)/np.prod(a.shape)
         return rb/nbins
-        
-    def merge_flattened_videos(self):
+
+    def merge_flattened_videos(self, imagedata, metadata, gamma=1.0, register=False, mosaic_data=None):
         minx = 100000.  # start with really big values
         maxx = -100000.
         miny = 100000.
         maxy = -100000.
+        
         print ('Combining videos')
-
         exposures = []
         scalex = []  # for each image keep track of the scale
         scaley = []
@@ -235,8 +330,17 @@ class Montager():
         vscalex = 1.
         vscaley = 1.
         yflip = 1.
+        # determine order of merge. Brightest images are done first so they
+        # are underneath all others.
+        imax = np.zeros(len(imagedata))
+        for i, vdata in enumerate(imagedata):
+            imax[i] = np.max(np.max(vdata))
+        jmax = np.argsort(imax)
+        # print('jmax: ', jmax)
         # find extent for all images
-        for i, v in enumerate(self.videometadata):
+        polymap = MultiPolygon([])
+        vs = []
+        for i, v in enumerate(metadata):
             vt = v['transform']
             vr = v['region']
             vb = v['binning']
@@ -248,6 +352,13 @@ class Montager():
                       vt['pos'][1] + float(vr[1])*vt['scale'][1],
                       vt['pos'][1] + float(vr[3])*vt['scale'][1]
                     ]
+            mapext = ((extentx[0], extenty[0]), (extentx[0], extenty[1]), (extentx[1], extenty[1]),
+                        (extentx[1], extenty[0]), (extentx[0], extenty[0]))
+            data_poly = Polygon(mapext)
+            polymap = polymap.union(data_poly)
+            if polymap.type == 'Polygon': # that sometimes converts to a basic Polygon
+                polymap = MultiPolygon([polymap])
+
             if self.verbose:
                 print('extents: ', extentx, extenty)
                 print('region: ', vr)
@@ -260,32 +371,56 @@ class Montager():
             maxy = np.max((maxy, extenty[0], extenty[1]))
 
             vscalex = np.min((np.fabs(vt['scale'][0]), vscalex))
+            vs.append(vt['scale'][0])
             vscaley = np.min((np.fabs(vt['scale'][1]), vscaley))
             if vt['scale'][1] < 0.:
                 yflip = -1
-        grid_x = int((maxx-minx)/vscalex) # add 1 for boundary or int flooring
-        grid_y = int((maxy-miny)/vscaley)
+        grid_x = int(1.5*(maxx-minx)/vscalex)
+        grid_y = int(1.5*(maxy-miny)/vscaley)
         if self.verbose:
             print('minx: %15g  maxx: %15g miny: %g  maxy: %g' % (minx*1000, maxx*1000, miny, maxy))
             print('spanx: %f  spany: %f' % (1000*(maxx-minx), 1000.*(maxy-miny)))
             print('scalex, scaley: ', vscalex, vscaley*yflip)
             print('grid_x, y: ', grid_x, grid_y)
+        # print('vscalex, y: ', vscalex, vscaley)
+        # print('Bounds: ', polymap.bounds)
+        # b = [x for x in polymap.bounds]
+        # b[0] *= 0.9
+        # b[2] *= 1.1
+        # b[1] *= 0.9
+        # b[3] *= 1.1
+        # ib = b.copy()
+        # ib[0] = int(b[0]/vscalex)
+        # ib[2] = int(b[2]/vscalex)
+        # ib[1] = int(b[1]/vscaley)
+        # ib[3] = int(b[3]/vscaley)
+        # print('b: ', b)
+        # print('ib: ', ib)
+        # print('ibx: ', ib[2]-ib[0])
+        # print('ibx: ', ib[3]-ib[1])
+        # print(grid_x, grid_y)
+        # print(vs)
+        # exit()
         self.merged_image = np.zeros((grid_x, grid_y))  # create space to hold image
         self.n_images = np.zeros((grid_x, grid_y))
-        for i, vdata in enumerate(self.allflat):  # place the images onto the big map
+        bkgd = 0.
+        
+        bigpoly = MultiPolygon([])
+        bigpoly2 = MultiPolygon([])
+        for i, vdata in enumerate(imagedata):  # place the images onto the big map
             vdata = vdata/exposures[i]
-            v = self.videometadata[i]
+            v = metadata[i]
             vt = v['transform']
             vp = vt['pos']
             vr = v['region']
             vb = v['binning']
-            
+
             ix = int((vp[0]-minx)/vscalex)
             iy = int((vp[1]-miny)/vscaley)
             if self.verbose:
                 print('vb: ', vb)
                 print('vr: ', vr)
-                print('Mapping Vvideo image i: %d' % i, vdata.shape)
+                print('Mapping Video image i: %d' % i, vdata.shape)
                 print('to new shape: ', vdata.shape[0]*vb[0], vdata.shape[1]*vb[1])
             vdata = self.rebin(vdata, (vdata.shape[0]*vb[0], vdata.shape[1]*vb[1]))
             # check bounds for mapping
@@ -304,78 +439,148 @@ class Montager():
                 print('    **** Padding *****')
                 self.merged_image = np.pad(self.merged_image,
                     pad_width=((0, delx),(0, dely+1)),
-                    mode='constant', constant_values=0.)
+                    mode='constant', constant_values=bkgd)
                 self.n_images = np.pad(self.n_images,
                     pad_width=((0, delx),(0, dely+1)),
-                    mode='constant', constant_values=0.)
-            
+                    mode='constant', constant_values=bkgd)
+
             yseq = range(iyw, iy, -1)
-            print('max yseq: ', max(yseq))
-            # find if region already has an image here, and do a registration using the area that overlaps
-            # print('i: ', i)
-            # refimg = self.n_images[ix:ixw, yseq]  # get the ref image (and flip)
-            # if np.sum(refimg) > 100.: # require 100 points overlap
-            #     # print(np.sum(refimg))# make intersecting mask
-            #    #  print(refimg.shape, len(range(ix,ixw))*len(yseq), np.prod(refimg.shape))
-            #    #  maskb = np.ma.masked_where(refimg > 0., refimg)  # check
-            #    #  maskn = np.ma.masked_where(np.ma.getmask(maskb), vdata)
-            #    #  maskn = np.where(refimg > 0, vdata)
-            #    #  print('maskb shape: ', np.array(maskb).shape, np.ma.count(maskb))
-            #    #  print('maskn shape: ', maskn.shape, np.ma.count(maskn))
-            #     refimg[refimg>0] = 1
-            #     di = np.argwhere(refimg*vdata > 0)
-            #     print ('di shape: ', di.shape)
-            #     print('di: ', di)
-            # #    vdp = vdata*refimg
-            #  #   vdp[vdp == 0.0] = np.nan
-            # #    refimg[refimg == 0.0] = np.nan
-            #     fi = 0
-            #     li = refimg.shape[0]
-            #     for i in range(refimg.shape[0]):
-            #         v = np.argwhere(refimg[i,:] > 0)
-            #         print (len(v))
-            #         if len(v) > 0:
-            #             fi = min(fi, v[0])
-            #             li = max(li, v[-1])
-            #     fj = 0
-            #     lj = refimg.shape[1]
-            #     for j in range(refimg.shape[1]):
-            #         v = np.argwhere(refimg[:,j] > 0)
-            #         if len(v) > 0:
-            #             fj = min(fj, v[0])
-            #             lj = max(lj, v[-1])
-            #
-            #     print('fi li fj lj', fi, li, fj, lj)
-            #     # mxl = np.argwhere(vdp > 0.)[0]
-            #     # vdp = vdp[mxl]
-            #     # print(mxl)
-            #     # print( vdp.shape, vdata.shape)
-            #     # exit(1)
-            #     off = imreg.translation(vdata[fi:li, fj:lj], refimg[fi:li, fj:lj])
-            #     print ('Registration Offsets: ', off)
-            #     offt = np.array(off).T
-            #
-            #     #exit(1)
+
+            # all shapes are rectangles.
+            # So we make a polygon that represents the overlap between two subsequent rectangles.
             
-            self.n_images[ix:ixw, yseq] += 1.0
-            
-            self.merged_image[ix:ixw, yseq] += vdata
+            data_poly = Polygon([(ix, iy), (ix, iyw), (ixw, iyw), (ixw, iy), (ix, iy)])
+
+            # if not bigpoly2.is_empty:
+            #     c = ['g', 'b', 'r', 'y', 'c', 'm']
+            #     fig = mpl.figure(1, figsize=(8,6), dpi=90)
+            #     # 1: valid polygon
+            #     ax1 = fig.add_subplot(121)
+            #     for ie, p in enumerate(bigpoly2):
+            #         ax1.plot(p.exterior.xy[0], p.exterior.xy[1], c[ie])
+            #     patch1 = PolygonPatch(bigpoly2, facecolor='k', edgecolor='r', alpha=0.3, zorder=2)
+            #     ax1.add_patch(patch1)
+            #     patch2 = PolygonPatch(data_poly, facecolor='b', edgecolor='g', alpha=0.2, zorder=2)
+            #     ax1.add_patch(patch2)
+            #     patch3 = PolygonPatch(bigpoly2.intersection(data_poly), facecolor='y', edgecolor='k', linewidth=2, alpha=0.2, zorder=2)
+            #     ax1.add_patch(patch3)
+            #     bigpoly2 = bigpoly2.union(data_poly)
+            #     if bigpoly2.type == 'Polygon': # that sometimes converts to a basic Polygon
+            #         bigpoly2 = MultiPolygon([bigpoly2])
+            #     mpl.show()
+            #     continue
+            if bigpoly.intersects(data_poly):
+                overlap = bigpoly.intersection(data_poly)  # get intersection region
+                b = [int(a) for a in overlap.bounds]
+                target_shape = self.n_images[b[0]:b[2], b[1]:b[3]].shape
+                thr = 0.1 * np.prod(target_shape)  # minimal overlap region 
+                off = {'angle': 0., 'tvec': [0, 0]}
+                if mosaic_data is None and np.sum(self.n_images[b[0]:b[2], b[1]:b[3]] > 0) > thr:   # exceed threshold of overlap, try alignment against existing
+                    # print('threshold: ', np.sum(self.n_images[b[0]:b[2], b[1]:b[3]] > 0), thr, target_shape)
+                    i_m = self.merged_image[b[0]:b[2], b[1]:b[3]]  # get intersection in image
+                    x0 = b[0] - ix
+                    x1 = b[2] - ix
+                    y0 = b[1] - iy
+                    y1 = b[3] - iy
+                    # print('overlap translated: ', x0, x1, y0, y1)
+                    v_m = np.fliplr(vdata[x0:x1, y0:y1]) # get intersecting  data
+                    v_m = vdata[x0:x1, y0:y1] # get intersecting  data
+                    # fig = mpl.figure(1, figsize=(8,6), dpi=90)
+                    # # 1: valid polygon
+                    # ax1 = fig.add_subplot(121)
+                    # ax1.imshow(i_m.T, origin='upper')
+                    # ax1.set_title('Main Image (intersect)')
+                    # ax2 = fig.add_subplot(122)
+                    # ax2.imshow(v_m.T, origin='upper')
+                    # ax2.set_title('new data')
+                    # mpl.show()
+                    if register:
+                        try:
+                            off = imreg.translation(i_m, v_m)
+                        except:
+                            print('failed translation')
+                            print(np.any(np.isnan(i_m)))
+                            print(np.any(np.isnan(v_m)))
+                            print(np.amax(i_m), np.amax(v_m))
+                            print(np.amin(i_m), np.amin(v_m))
+                            raise ValueError()
+                if mosaic_data is not None:
+                    # print(mosaic_data[i])
+                    pos = mosaic_data[i]['userTransform']['pos']
+                    pos[0] = int(pos[0]/vscalex)  # pixels shift
+                    pos[1] = int(pos[1]/vscaley)
+                    off['tvec'] = pos
+
+                print('Registration Offsets: ', off)
+
+                if off['angle'] == 0 and abs(off['tvec'][0]) < 200 and abs(off['tvec'][1]) < 200:  # rotation and big translation is not allowed
+                    offv = off['tvec']
+                    ix = int(ix-offv[1])
+                    ixw = int(ixw-offv[1])
+                    y0 = int(iyw-offv[0])
+                    y1 = int(iy-offv[0])
+                    # timg = imreg.transform_img(vdata, angle=off['angle'], tvec=off['tvec'])
+                    if ix < 0:
+                        vdata = vdata[-ix+1:, :]  # clip vdata on the left side
+                        ix = 0  
+                    self.merged_image[ix:ixw, y0:y1:-1] += vdata
+                    # timg = imreg.transform_img(vdata, angle=off['angle'], tvec=off['tvec'])
+                    # imreg.imshow(self.merged_image[ix:ixw, y0:y1:-1], vdata, timg, cmap=None, fig=None)
+                    # mpl.show()
+                    print('aligned')
+                else:
+                    self.merged_image[ix:ixw, yseq] += vdata
+                # else:
+                #     self.merged_image[ix:ixw, yseq] += vdata
+                    
+            else:
+                # fig = mpl.figure(1, figsize=(8,6), dpi=90)
+                # # 1: valid polygon
+                # ax1 = fig.add_subplot(121)
+                # ax1.imshow(self.merged_image[ix:ixw, yseq], origin='upper')
+                # ax1.set_title('Main Image2')
+                # ax2 = fig.add_subplot(122)
+                # ax2.imshow(vdata, origin='upper')
+                # ax2.set_title('new data2')
+                # mpl.show()
+                self.merged_image[ix:ixw, yseq] += vdata
+                print('added')
+
+            self.n_images[ix:ixw, yseq] += 1.0  # keep track of how many planes were added here
+            bigpoly = bigpoly.union(data_poly)
+            if bigpoly.type == 'Polygon': # that sometimes converts to a basic Polygon
+                bigpoly = MultiPolygon([bigpoly])
+            # print('bigpoly: ', bigpoly)
+        self.bigpoly = bigpoly
+        self.image_boundary = [self.bigpoly.bounds[0]*vscalex, self.bigpoly.bounds[1]*vscaley,
+                self.bigpoly.bounds[2]*vscalex, self.bigpoly.bounds[3]*vscaley]
+        
         self.n_images[self.n_images == 0.] = np.nan  # trick for avoiding divide by 0
         self.merged_image = self.merged_image/self.n_images
-        # minintensity = np.nanmin(np.nanmin(self.merged_image[self.merged_image > 0]))
-        # self.merged_image -= minintensity
-        #self.merged_image = np.nan_to_num(self.merged_image-minintensity)
-        self.merged_image = self.gamma_correction(self.merged_image, 2.2)
+        minintensity = np.nanmin(self.merged_image)
+        self.merged_image = np.nan_to_num(self.merged_image, minintensity)
+        # self.merged_image -= minintensity + 1e-6
+        self.merged_image = self.gamma_correction(self.merged_image, gamma=1.5)
+        print('image minm: ', np.min(self.merged_image), '  max: ', np.max(self.merged_image))
+        
+        # self.merged_image = np.fliplr(self.gamma_correction(self.merged_image, gamma=gamma))
         #self.merged_image = self.threshold_image(self.merged_image, 2000.)
        # self.merged_image = self.rolling_ball(self.merged_image)
-    
-    def gamma_correction(self, image, gamma=2.2, imagescale=2^16):
+
+    def gamma_correction(self, image, gamma=2.2, imagescale=np.power(2, 16)):
         if gamma == 0.0:
             return image
         imagescale= float(imagescale)
-        corrected = (np.power((image/imagescale), (1. / gamma)))*imagescale
+        # print('iscale, gamma: ', imagescale, gamma)
+        try:
+            imr = image/imagescale
+            corrected = (np.power(imr, (1. / gamma)))*imagescale
+        except:
+            print('image minm: ', np.min(image), '  max: ', np.max(image))
+            print('any neg or zero? ', np.any(image <= 0.))
+            raise ValueError
         return corrected
-    
+
     def threshold_image(self, image, thr):
         image[image<thr] = 0.
         image[image>=thr] = 1.
@@ -413,15 +618,23 @@ class Montager():
             return self._index
         self._index = configfile.readConfigFile(indexFile)
         return self._index
-        
 
-if __name__ == '__main__':
-#    sel = FS.FileSelector(dialogtype='dir')
-#    if sel.fileName is not None:
-    M = Montager(verbose=False)
-    M.list_images()
-    # M.process_videos(window='pyqtgraph', show=True)
+def doit():
+    # sel = FS.FileSelector(dialogtype='dir')
+    # print('main sel filename: ', sel.fileName)
+    # if sel.fileName is not None:
+    M = Montager(verbose=False) # , celldir=Path(sel.fileName))
+    M.run()
+    # M.app = pg.mkQApp()
+    # M.win = pg.QtGui.QWidget()
+    M.list_images_and_videos()
+    # M.process_images_and_videos(window='pyqtgraph', show=True, gamma=2.2, merge_gamma=2., sigma=3.0)
+    M.process_videos(window='mpl', show=True, gamma=1.5, merge_gamma=-1., sigma=2.5)
+    # M.process_images(window='mpl', show=True, gamma=1.5)
+    # print('M: ', M)
     # if sys.flags.interactive == 0:
-    #     pg.QtGui.QApplication.exec_()
-    M.process_images(show=True)
-     
+#         pg.QtGui.QApplication.exec_()
+
+    
+if __name__ == '__main__':
+    M = doit()
