@@ -5,15 +5,15 @@ import sys
 from pathlib import Path
 import numpy as np
 import numpy.ma as ma  # masked arrays
-import pylibrary.tifffile as tifffile  # for tiff file read
+import pylibrary.tools.tifffile as tifffile  # for tiff file read
 # import tifffile
 import scipy
 import matplotlib.pyplot as mpl
 import pylibrary.plotting.plothelpers as PH
-import pylibrary.fileselector as FS
+import pylibrary.tools.fileselector as FS
 import pylibrary.plotting.pyqtgraph_plothelpers as PGH
 import pyqtgraph as pg
-from ephysanalysis import metaarray
+from ephys.ephysanalysis import metaarray
 from pyqtgraph import configfile
 import imreg_dft as imreg
 # import montage.imreg
