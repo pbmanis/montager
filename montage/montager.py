@@ -5,19 +5,21 @@ import sys
 from pathlib import Path
 import numpy as np
 import numpy.ma as ma  # masked arrays
-import pylibrary.tools.tifffile as tifffile  # for tiff file read
-# import tifffile
 import scipy
 import matplotlib.pyplot as mpl
+from pyqtgraph import configfile
+
+import pyqtgraph as pg
+
+import pylibrary.tools.tifffile as tiffile
 import pylibrary.plotting.plothelpers as PH
 import pylibrary.tools.fileselector as FS
 import pylibrary.plotting.pyqtgraph_plothelpers as PGH
-import pyqtgraph as pg
+
 from ephys.ephysanalysis import metaarray
-from pyqtgraph import configfile
 import imreg_dft as imreg
 # import montage.imreg
-import mahotas as MH
+# import mahotas as MH
 from shapely.geometry import Polygon, MultiPolygon
 from descartes.patch import PolygonPatch
 from shapely.ops import unary_union
@@ -261,7 +263,8 @@ class Montager():
         """
         maxv = 0.
         stack,h,w = video.shape
-        focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
+        # focus = np.array([MH.sobel(self.gamma_correction(t, gamma=gamma), just_filter=True) for t in video])
+        focus = self.gamma_correction(t, gamma-gamma)
         best = np.argmax(focus, 0)
         video = video.reshape((stack,-1))# image is now (stack, nr_pixels)
         video = video.transpose()  # image is now (nr_pixels, stack)
