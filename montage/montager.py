@@ -71,7 +71,7 @@ class Montager():
         # if len(self.videos) == 0 and len(self.images) == 0:
         #     exit(0)
         self.celldir = celldir
-        self.celldirname = str(celldir).replace('_', '\_')
+        self.celldirname = str(celldir).replace('_', r'\_')
         # else:
         #     self.videos = None # glob.glob(celldir + '/video*.ma')
         #     self.images = None # glob.glob(celldir + '/image*.tif')
@@ -82,7 +82,7 @@ class Montager():
         for m in mosaics:
             if m['name'].startswith('video_'):
                 self.videos.append(Path(self.celldir.parent, m['name']))
-        self.celldirname = str(self.celldir).replace('_', '\_')
+        self.celldirname = str(self.celldir).replace('_', r'\_')
         
 
     def get_images(self, celldir):
@@ -216,7 +216,7 @@ class Montager():
                 print('gamma: ', gamma)
                 imfig = ax[i].imshow(self.gamma_correction(img, gamma=gamma))
                 PH.noaxes(ax[i])
-                ax[i].set_title(fne.replace('_', '\_'), fontsize=8)
+                ax[i].set_title(fne.replace('_', r'\_'), fontsize=8)
                 imfig.set_cmap(self.cmap)
             if show:
                 mpl.show()
