@@ -84,16 +84,16 @@ from __future__ import division, print_function
 import math
 
 import numpy as np
-from numpy.fft import fft2, ifft2, fftshift
+from numpy.fft import fft2, fftshift, ifft2
 
 try:
     import scipy.ndimage.interpolation as ndii
 except ImportError:
     import ndimage.interpolation as ndii
 
-__version__ = '2013.01.18'
-__docformat__ = 'restructuredtext en'
-__all__ = ['translation', 'similarity']
+__version__ = "2013.01.18"
+__docformat__ = "restructuredtext en"
+__all__ = ["translation", "similarity"]
 
 
 def translation(im0, im1):
@@ -152,13 +152,13 @@ def similarity(im0, im1):
     ir = np.abs(ifft2((f0 * f1.conjugate()) / r0))
     i0, i1 = np.unravel_index(np.argmax(ir), ir.shape)
     angle = 180.0 * i0 / ir.shape[0]
-    scale = log_base ** i1
+    scale = log_base**i1
 
     if scale > 1.8:
         ir = np.abs(ifft2((f1 * f0.conjugate()) / r0))
         i0, i1 = np.unravel_index(np.argmax(ir), ir.shape)
         angle = -180.0 * i0 / ir.shape[0]
-        scale = 1.0 / (log_base ** i1)
+        scale = 1.0 / (log_base**i1)
         if scale > 1.8:
             raise ValueError("Images are not compatible. Scale change > 1.8")
 
@@ -167,15 +167,15 @@ def similarity(im0, im1):
     elif angle > 90.0:
         angle -= 180.0
 
-    im2 = ndii.zoom(im1, 1.0/scale)
+    im2 = ndii.zoom(im1, 1.0 / scale)
     im2 = ndii.rotate(im2, angle)
 
     if im2.shape < im0.shape:
         t = np.zeros_like(im0)
-        t[:im2.shape[0], :im2.shape[1]] = im2
+        t[: im2.shape[0], : im2.shape[1]] = im2
         im2 = t
     elif im2.shape > im0.shape:
-        im2 = im2[:im0.shape[0], :im0.shape[1]]
+        im2 = im2[: im0.shape[0], : im0.shape[1]]
 
     f0 = fft2(im0)
     f1 = fft2(im2)
@@ -192,10 +192,10 @@ def similarity(im0, im1):
     # correct parameters for ndimage's internal processing
     if angle > 0.0:
         d = int((int(im1.shape[1] / scale) * math.sin(math.radians(angle))))
-        t0, t1 = t1, d+t0
+        t0, t1 = t1, d + t0
     elif angle < 0.0:
         d = int((int(im1.shape[0] / scale) * math.sin(math.radians(angle))))
-        t0, t1 = d+t1, d+t0
+        t0, t1 = d + t1, d + t0
     scale = (im1.shape[1] - 1) / (int(im1.shape[1] / scale) - 1)
 
     return im2, scale, angle, [-t0, -t1]
@@ -232,12 +232,11 @@ def logpolar(image, angles=None, radii=None):
         radii = shape[1]
     theta = np.empty((angles, radii), dtype=np.float64)
     theta.T[:] = -np.linspace(0, np.pi, angles, endpoint=False)
-    #d = radii
-    d = np.hypot(shape[0]-center[0], shape[1]-center[1])
+    # d = radii
+    d = np.hypot(shape[0] - center[0], shape[1] - center[1])
     log_base = 10.0 ** (math.log10(d) / (radii))
     radius = np.empty_like(theta)
-    radius[:] = np.power(log_base, np.arange(radii,
-                                                   dtype=np.float64)) - 1.0
+    radius[:] = np.power(log_base, np.arange(radii, dtype=np.float64)) - 1.0
     x = radius * np.sin(theta) + center[0]
     y = radius * np.cos(theta) + center[1]
     output = np.empty_like(x)
@@ -248,16 +247,17 @@ def logpolar(image, angles=None, radii=None):
 def highpass(shape):
     """Return highpass filter to be multiplied with fourier transform."""
     x = np.outer(
-        np.cos(np.linspace(-math.pi/2., math.pi/2., shape[0])),
-        np.cos(np.linspace(-math.pi/2., math.pi/2., shape[1])))
+        np.cos(np.linspace(-math.pi / 2.0, math.pi / 2.0, shape[0])),
+        np.cos(np.linspace(-math.pi / 2.0, math.pi / 2.0, shape[1])),
+    )
     return (1.0 - x) * (2.0 - x)
 
 
 def imread(fname, norm=True):
     """Return image data from img&hdr uint8 files."""
-    with open(fname+'.hdr', 'r') as fh:
+    with open(fname + ".hdr", "r") as fh:
         hdr = fh.readlines()
-    img = np.fromfile(fname+'.img', np.uint8, -1)
+    img = np.fromfile(fname + ".img", np.uint8, -1)
     img.shape = int(hdr[4].split()[-1]), int(hdr[3].split()[-1])
     if norm:
         img = img.astype(np.float64)
@@ -268,8 +268,9 @@ def imread(fname, norm=True):
 def imshow(im0, im1, im2, im3=None, cmap=None, **kwargs):
     """Plot images using matplotlib."""
     from matplotlib import pyplot
+
     if cmap is None:
-        cmap = 'coolwarm'
+        cmap = "coolwarm"
     if im3 is None:
         im3 = np.abs(im2 - im0)
     pyplot.subplot(221)

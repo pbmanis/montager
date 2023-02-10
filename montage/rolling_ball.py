@@ -1,4 +1,5 @@
 import math
+
 import numpy
 
 """
@@ -27,14 +28,15 @@ def smooth(array, window=3.0):
 
     for i in range(dx):
         for j in range(dy):
-            window_array = array[max(i - edgex, 0):min(i + edgex + 1, dx),
-                                 max(j - edgey, 0):min(j + edgey + 1, dy)]
+            window_array = array[
+                max(i - edgex, 0) : min(i + edgex + 1, dx),
+                max(j - edgey, 0) : min(j + edgey + 1, dy),
+            ]
             new_array[i, j] = window_array.mean()
     return new_array
 
 
-def rolling_ball_background(array, radius, light_background=True,
-                            smoothing=True):
+def rolling_ball_background(array, radius, light_background=True, smoothing=True):
     """
     Calculates and subtracts background from array.
     Arguments:
@@ -50,8 +52,9 @@ def rolling_ball_background(array, radius, light_background=True,
 
     ball = RollingBall(radius)
     float_array = array
-    float_array = rolling_ball_float_background(float_array, radius, invert,
-                                                smoothing, ball)
+    float_array = rolling_ball_float_background(
+        float_array, radius, invert, smoothing, ball
+    )
     background_pixels = float_array.flatten()
 
     if invert:
@@ -61,7 +64,7 @@ def rolling_ball_background(array, radius, light_background=True,
     pixels = numpy.int8(array.flatten())
 
     for p in range(len(pixels)):
-        value = (pixels[p] & 0xff) - (background_pixels[p] + 255) + offset
+        value = (pixels[p] & 0xFF) - (background_pixels[p] + 255) + offset
         if value < 0:
             value = 0
         if value > 255:
@@ -72,8 +75,7 @@ def rolling_ball_background(array, radius, light_background=True,
     return numpy.reshape(pixels, array.shape)
 
 
-def rolling_ball_float_background(float_array, radius, invert, smoothing,
-                                  ball):
+def rolling_ball_float_background(float_array, radius, invert, smoothing, ball):
     """
     Create background for a float image by rolling a ball over the image
     """
@@ -122,10 +124,10 @@ def roll_ball(ball, array):
         if next_line_to_read < height:
             src = next_line_to_read * width
             dest = next_line_to_write_in_cache * width
-            cache[dest:dest + width] = pixels[src:src + width]
+            cache[dest : dest + width] = pixels[src : src + width]
             p = next_line_to_read * width
             for x in range(width):
-                pixels[p] = -float('inf')
+                pixels[p] = -float("inf")
                 p += 1
         y_0 = y - radius
         if y_0 < 0:
@@ -135,7 +137,7 @@ def roll_ball(ball, array):
         if y_end >= height:
             y_end = height - 1
         for x in range(-radius, width + radius):
-            z = float('inf')
+            z = float("inf")
             x_0 = x - radius
             if x_0 < 0:
                 x_0 = 0
@@ -174,6 +176,7 @@ class RollingBall(object):
     """
     A rolling ball (or actually a square part thereof).
     """
+
     def __init__(self, radius):
         if radius <= 10:
             self.shrink_factor = 1

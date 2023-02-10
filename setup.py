@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import os
 
 # Use Semantic Versioning, http://semver.org/
-version_info = (0, 1, 0, '')
+version_info = (0, 2, 0, '')
 __version__ = '%d.%d.%d%s' % version_info
 
 
@@ -16,15 +16,15 @@ setup(name='montage',
       packages=find_packages(include=['montage*']),
       zip_safe=False,
 
-      install_requires=['matplotlib>=3.0',
+      install_requires=['matplotlib>=3.6',
           ],
       entry_points={
           'console_scripts': [
-               'montager=montage.montager:doit',
+               'montager=montage.montager:main',
           ],
       },
       classifiers = [
-             "Programming Language :: Python :: 3.6+",
+             "Programming Language :: Python :: 3.10+",
              "Development Status ::  Beta",
              "Environment :: Console",
              "Intended Audience :: Manis Lab",
