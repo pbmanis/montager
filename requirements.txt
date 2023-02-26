@@ -20,7 +20,7 @@ requests==2.23.0
 scipy>=1.6
 six==1.14.0
 uncertainties==3.1.6
-urllib3==1.25.8
+urllib3==1.25.9
 mahotas
 
 #-e git+https://github.com/pbmanis/pyqtgraph.git@e3ac16b3a220f76b69bf26c295edf140e2e928b4#egg=pyqtgraph
