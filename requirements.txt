@@ -1,5 +1,5 @@
 # montager requirements
-asteval==0.9.27
+
 MetaArray>=2.0.5
 matplotlib>=3.6.0
 seaborn>=0.12
