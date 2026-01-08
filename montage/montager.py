@@ -23,6 +23,7 @@ from pyqtgraph import configfile
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 import scipy.ndimage as scim
+import skimage.transform
 from skimage.morphology import ball
 configfilename = "montage.cfg"
 
@@ -109,17 +110,37 @@ class Montager:
         configfile.writeConfigFile(self.configuration, configfilename)
 
     def list_images_and_videos(self):
-        print("videos: ", self.videos)
-        print("images: ", self.images)
-        print("videos:")
+        print("List images and videos:")
+        print(f"  Videos (N={len(self.videos):d}):")
         for vf in self.videos:
             v = Path(vf).name
-            print("   %s" % v)
-        print("images")
+            print(f"    {v:s}" )
+        print(f"  Images (N = {len(self.images):d})")
         for im in self.images:
             img = Path(im).name
-            print("   %s" % img)
+            print("    %s" % img)
         print()
+
+    def loadvideos(self):
+        """
+        loads all videos in the dir into a list
+        and in the same order, grabs the metadata
+        """
+        self.videodata = []
+        self.metadata = []
+        print("Loading video files:", len(self.videos))
+        for j, im in enumerate(sorted(self.videos)):
+            print("   %s" % im)
+            imdat = metaarray.MetaArray(file=im, readAllData=True)
+            info = imdat[0].infoCopy()
+            self.videodata.append(imdat.asarray())
+            imd, imf = os.path.split(im)
+            index = self.getIndex(currdir=imd)
+            print(imf, self._index.keys())
+            if imf in self._index.keys():
+                self.metadata.append(self._index[imf])
+            # except:
+            #     raise Exception("No matching .index entry for video file %s" % imf)
 
     def process_videos(
         self,
@@ -131,52 +152,68 @@ class Montager:
         register=True,
         mosaic_data=None,
     ):
+        """Process the video files in this directory.
+        Each file is loaded and flattened. The flattening involves a gamma
+        correction.
+        The resulting list of flattened videos is then placed onto a large canvas.
+        The metadata for each image is also recorded, so that positions can
+        be mapped.
+
+        Args:
+            show (bool, optional): _description_. Defaults to True.
+            window (str, optional): _description_. Defaults to "pyqtgraph".
+            gamma (float, optional): _description_. Defaults to 1.0.
+            merge_gamma (float, optional): _description_. Defaults to 1.0.
+            sigma (float, optional): _description_. Defaults to 2.0.
+            register (bool, optional): _description_. Defaults to True.
+            mosaic_data (_type_, optional): _description_. Defaults to None.
+        """
         self.loadvideos()
         self.flatten_all_videos(gamma=gamma, sigma=sigma)
 
-        self.merge_flattened_videos(
-            imagedata=self.allflat,
-            metadata=self.videometadata,
-            gamma=merge_gamma,
-            register=register,
-            mosaic_data=mosaic_data,
-        )
-        if show:
-            if window == "mpl":
-                f, ax = mpl.subplots(1, 1)
-                f.suptitle(self.celldir)
-                # ax = ax.ravel()
-                self.show_merged_MPL(self.merged_image, ax, show=show)
-            elif window == "pyqtgraph":
-                self.show_merged_pyqtgraph(self.merged_image, show=show)
-            else:
-                pass
+        if len(self.allflat) > 0:
+            self.merge_flattened_videos(
+                imagedata=self.allflat,
+                metadata=self.metadata,
+                gamma=merge_gamma,
+                register=register,
+                mosaic_data=mosaic_data,
+            )
+        # if show:
+        #     if window == "mpl":
+        #         f, ax = mpl.subplots(1, 1)
+        #         f.suptitle(self.celldir)
+        #         # ax = ax.ravel()
+        #         self.show_merged_MPL(self.merged_image, ax, show=show)
+        #     elif window == "pyqtgraph":
+        #         self.show_merged_pyqtgraph(self.merged_image, show=show)
+        #     else:
+        #         pass
 
-    def loadvideos(self):
-        """
-        loads all videos in the dir into a list
-        and in the same order, grabs the metadata
-        """
-        self.videodata = []
-        self.videometadata = []
-        print("Loading video files:")
-        for j, im in enumerate(sorted(self.videos)):
-            print("   %s" % im)
-            imdat = metaarray.MetaArray(file=im, readAllData=True)
-            info = imdat[0].infoCopy()
-            self.videodata.append(imdat.asarray())
+    def load_images(self):
+        self.imagedata = []
+        self.imagemetadata = []
+        print("Loading image files: ")
+        for j, im in enumerate(sorted(self.images)):
+            print(f"getting image:   {str(im):s}")
+            with tifffile.TiffFile(im) as tif:
+                images = tif.asarray()
+            self.imagedata.append(images)
             imd, imf = os.path.split(im)
             index = self.getIndex(currdir=imd)
-            if imf in self._index.keys():
-                self.videometadata.append(self._index[imf])
-            # except:
-            #     raise Exception("No matching .index entry for video file %s" % imf)
+            print("loaded image index keys: ", self._index.keys())
+            try:
+                if imf in self._index.keys():
+                    self.imagemetadata.append(self._index[imf])
+
+            except:
+                raise Exception("No matching .index entry for image file %s" % imf)
 
     def process_images(self, window="pyqtgraph", show=True, gamma=2.2):
         self.load_images()
         self.show_images(window=window, show=show, gamma=gamma)
 
-    def process_images_and_videos(
+    def assemble_inages_and_videos(
         self,
         show=True,
         window="pyqtgraph",
@@ -194,10 +231,10 @@ class Montager:
         self.load_images()
         for i, d in enumerate(self.imagedata):
             self.allflat.append(self.imagedata[i])
-            self.videometadata.append(self.imagemetadata[i])
+            self.metadata.append(self.imagemetadata[i])
         self.merge_flattened_videos(
             imagedata=self.allflat,
-            metadata=self.videometadata,
+            metadata=self.metadata,
             gamma=merge_gamma,
             register=register,
             mosaic_data=mosaic_data,
@@ -212,23 +249,6 @@ class Montager:
             else:
                 self.show_merged_pyqtgraph(self.merged_image, show=show)
 
-    def load_images(self):
-        self.imagedata = []
-        self.imagemetadata = []
-        print("Loading image files: ")
-        for j, im in enumerate(sorted(self.images)):
-            print("   %s" % im)
-            with tifffile.TiffFile(im) as tif:
-                images = tif.asarray()
-            self.imagedata.append(images)
-            imd, imf = os.path.split(im)
-            index = self.getIndex(currdir=imd)
-            try:
-                if imf in self._index.keys():
-                    self.imagemetadata.append(self._index[imf])
-
-            except:
-                raise Exception("No matching .index entry for image file %s" % imf)
 
     def show_images(self, window="pyqtgraph", show=True, gamma=2.2):
         rows, cols = PH.getLayoutDimensions(len(list(self.images)), pref="height")
@@ -323,7 +343,7 @@ class Montager:
         np.nan_to_num(video, copy=False)
         print("video - image shape: ", video.shape)
         print(np.max(np.max(video)))
-        videon = scipy.misc.imresize(video, (1024, 1024), "lanczos")
+        videon = skimage.transform.resize(video, (2048, 2048))
         print(videon.shape)
         print(np.max(np.max(videon)))
 
@@ -356,7 +376,19 @@ class Montager:
     def merge_flattened_videos(
         self, imagedata, metadata, gamma=1.0, register=False, mosaic_data=None
     ):
-        minx = 100000.0  # start with really big values
+        """Take flattened videos and merge into one big flat image
+
+        Args:
+            imagedata (list of np arrays of flattened videos):The flattened videos
+            metadata (list of metadata list/dict): metadata associated with the videos
+            gamma (float, optional): gamma to apply to each flattened image_. Defaults to 1.0.
+            register (bool, optional): whether or not to try to register the images. Defaults to False.
+            mosaic_data (_type_, optional): _description_. Defaults to None.
+
+        Raises:
+            ValueError: If there is an error, this raises an exception. Sorry.
+        """        
+        minx = 100000.0  # start with really big values. Numbers are in meters
         maxx = -100000.0
         miny = 100000.0
         maxy = -100000.0
@@ -374,16 +406,18 @@ class Montager:
         yflip = 1.0
         # determine order of merge. Brightest images are done first so they
         # are underneath all others.
+        # Find the maximum value of each image
         imax = np.zeros(len(imagedata))
         for i, vdata in enumerate(imagedata):
             imax[i] = np.max(np.max(vdata))
+        # save the index to the image with the largest value.
         jmax = np.argsort(imax)
         # print('jmax: ', jmax)
         # find extent for all images
         polymap = MultiPolygon([])
         vs = []
-        print("metadata: ", metadata)
-        exit()
+        print("video metadata: ", metadata)
+
         for i, v in enumerate(metadata):
             vt = v["transform"]
             vr = v["region"]
@@ -441,26 +475,8 @@ class Montager:
             )
             print("scalex, scaley: ", vscalex, vscaley * yflip)
             print("grid_x, y: ", grid_x, grid_y)
-        # print('vscalex, y: ', vscalex, vscaley)
-        # print('Bounds: ', polymap.bounds)
-        # b = [x for x in polymap.bounds]
-        # b[0] *= 0.9
-        # b[2] *= 1.1
-        # b[1] *= 0.9
-        # b[3] *= 1.1
-        # ib = b.copy()
-        # ib[0] = int(b[0]/vscalex)
-        # ib[2] = int(b[2]/vscalex)
-        # ib[1] = int(b[1]/vscaley)
-        # ib[3] = int(b[3]/vscaley)
-        # print('b: ', b)
-        # print('ib: ', ib)
-        # print('ibx: ', ib[2]-ib[0])
-        # print('ibx: ', ib[3]-ib[1])
-        # print(grid_x, grid_y)
-        # print(vs)
-        # exit()
-        print(grid_x.shape, grid_y.shape)
+
+        print(grid_x, grid_y)
         self.merged_image = np.zeros((grid_x, grid_y))  # create space to hold image
         self.n_images = np.zeros((grid_x, grid_y))
         bkgd = 0.0
@@ -714,12 +730,12 @@ def main():
     M.run()
 
     M.list_images_and_videos()
-    # M.process_images_and_videos(window='pyqtgraph', show=True, gamma=2.2, merge_gamma=2., sigma=3.0)
+    M.assemble_inages_and_videos(window='pyqtgraph', show=True, gamma=2.2, merge_gamma=2., sigma=3.0)
     M.process_videos(window="mpl", show=True, gamma=1.5, merge_gamma=-1.0, sigma=2.5)
-    # M.process_images(window='mpl', show=True, gamma=1.5)
+    M.process_images(window='mpl', show=True, gamma=1.5)
     # print('M: ', M)
     if sys.flags.interactive == 0:
-        pg.QtGui.QApplication.exec()
+        pg.QtGui.QGuiApplication.exec()
 
     return M
 
